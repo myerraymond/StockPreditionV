@@ -13,32 +13,113 @@ import pandas as pd
 import pandas_datareader as web
 import datetime as dt
 import tensorflow as tf
+import yfinance as yahoo
 import yfinance as yf
+import os
+import pickle
 
+from datetime import datetime
 from sklearn.preprocessing import MinMaxScaler
 from tensorflow.keras.models import Sequential
 from tensorflow.keras.layers import Dense, Dropout, LSTM, InputLayer
+from sklearn.model_selection import train_test_split
+from sklearn.preprocessing import StandardScaler
 
-#------------------------------------------------------------------------------
+# ------------------------------------------------------------------------------
 # Load Data
 ## TO DO:
 # 1) Check if data has been saved before. 
 # If so, load the saved data
 # If not, save the data into a directory
-#------------------------------------------------------------------------------
-DATA_SOURCE = "yahoo"
-COMPANY = "TSLA"
+# ------------------------------------------------------------------------------
 
-# start = '2012-01-01', end='2017-01-01'
-TRAIN_START = '2015-01-01'
-TRAIN_END = '2020-01-01'
+# Parameters
 
-data =  yf.download(COMPANY, start=TRAIN_START, end=TRAIN_END, progress=False)
-# yf.download(COMPANY, start = TRAIN_START, end=TRAIN_END)
+# TASK B.2 START LINE 38 - 118
 
-# For more details: 
+DATA_SOURCE = 'yahoo'  # Directory where data will be saved or loaded from
+TICK = 'AMZN'  # Stock ticker symbol
+TRAIN_START = datetime.strptime('2020-01-01', '%Y-%m-%d').date()  # Start date for data retrieval
+TRAIN_END = datetime.strptime('2023-01-01', '%Y-%m-%d').date()  # End date for data retrieval
+VERSION = "3"  # Version of data to be saved
+TRAIN_TEST_RATIO = 0.8  # Ratio of training data to total data
+SPLIT_METHOD = 'date'  # Method for splitting data ('date' or 'random')
+SCALE_FEATURES = False  # Whether to scale the feature columns
+
+
+# data = yf.download(TICK, start=TRAIN_START, end=TRAIN_END)
+
+# Function to load or fetch data
+def load_data(DATA_SOURCE, TICK, TRAIN_START, TRAIN_END, TRAIN_TEST_RATIO, SPLIT_METHOD, SCALE_FEATURES):
+    # Check if the directory exists; if not, create it
+    if not os.path.exists(DATA_SOURCE):
+        os.makedirs(DATA_SOURCE)
+
+    # Construct the file path for data saving/loading
+    file_path = os.path.join(DATA_SOURCE, f"{TICK}_v{VERSION}.txt")
+
+    # Check if saved data exists; if yes, load it; if not, fetch from Yahoo Finance
+    if os.path.exists(file_path):
+        with open(file_path, 'rb') as file:
+            data = pickle.load(file)
+        print("DATA loaded successfully.")
+    else:
+        # Load data from Yahoo Finance
+        data = yf.download(TICK, start=TRAIN_START, end=TRAIN_END)
+
+        # Handle NaN values using forward filling
+        data = data.ffill().dropna()
+
+        # Save the fetched data
+        with open(file_path, 'wb') as file:
+            pickle.dump(data, file)
+        print("Data saved successfully.")
+
+    # Split data into train and test sets based on the value {SPLIT_METHOD}
+    if SPLIT_METHOD == 'date':
+        # If split method is 'date', calculate the date for the end of the training time
+        train_end_date = TRAIN_START + pd.DateOffset(days=int((TRAIN_END - TRAIN_START).days * TRAIN_TEST_RATIO))
+        # Extract the data for the training period (from TRAIN_START to train_end_date)
+        train_d = data[TRAIN_START:train_end_date]
+        # Extract the data for the testing period (from train_end_date to TRAIN_END)
+        test_d = data[train_end_date:TRAIN_END]
+    elif SPLIT_METHOD == 'random':
+        # If split method is 'random', use train_test_split to split the data randomly
+        # The train_size parameter specifies the ratio of training data
+        # The shuffle parameter is set too False to maintain order of the data
+
+        train_d, test_d = train_test_split(data, train_size=TRAIN_TEST_RATIO, shuffle=False)
+    else:
+        # If an invalid split method is specified, raise a ValueError
+        raise ValueError("Invalid split method specified.")
+
+    # Scale feature columns if specified
+    scalers = {}
+    if SCALE_FEATURES:
+        feature_columns = train_d.columns
+        scaler = StandardScaler()  # Instantiate StandardScaler object, removing the mean, scaling to unit variance
+        train_d[feature_columns] = scaler.fit_transform(train_d[feature_columns])  # Fit and transform training data
+        test_d[feature_columns] = scaler.transform(test_d[feature_columns])  # Transform test data using the same scaler
+        scalers['feature'] = scaler  # Store the scaler in the dictionary
+
+    return train_d, test_d, scalers
+
+
+# Load data using the load_data function
+train_d, test_d, scalers = load_data(DATA_SOURCE, TICK, TRAIN_START, TRAIN_END, TRAIN_TEST_RATIO, SPLIT_METHOD,
+                                     SCALE_FEATURES)
+print("Train Data: ")
+print(train_d)
+print("Test Data: ")
+print(test_d)
+print("Scalers: ")
+print(scalers)
+
+# TASK B.2 END
+
+# For more details:
 # https://pandas.pydata.org/pandas-docs/stable/user_guide/dsintro.html
-#------------------------------------------------------------------------------
+# ------------------------------------------------------------------------------
 # Prepare Data
 ## To do:
 # 1) Check if data has been prepared before. 
@@ -46,13 +127,13 @@ data =  yf.download(COMPANY, start=TRAIN_START, end=TRAIN_END, progress=False)
 # If not, save the data into a directory
 # 2) Use a different price value eg. mid-point of Open & Close
 # 3) Change the Prediction days
-#------------------------------------------------------------------------------
+# ------------------------------------------------------------------------------
 PRICE_VALUE = "Close"
 
-scaler = MinMaxScaler(feature_range=(0, 1)) 
+scaler = MinMaxScaler(feature_range=(0, 1))
 # Note that, by default, feature_range=(0, 1). Thus, if you want a different 
 # feature_range (min,max) then you'll need to specify it here
-scaled_data = scaler.fit_transform(data[PRICE_VALUE].values.reshape(-1, 1)) 
+scaled_data = scaler.fit_transform(train_d[PRICE_VALUE].values.reshape(-1, 1))
 # Flatten and normalise the data
 # First, we reshape a 1D array(n) to 2D array(n,1)
 # We have to do that because sklearn.preprocessing.fit_transform()
@@ -69,16 +150,16 @@ scaled_data = scaler.fit_transform(data[PRICE_VALUE].values.reshape(-1, 1))
 # given to reshape so as to maintain the same number of elements.
 
 # Number of days to look back to base the prediction
-PREDICTION_DAYS = 60 # Original
+PREDICTION_DAYS = 60  # Original
 
 # To store the training data
 x_train = []
 y_train = []
 
-scaled_data = scaled_data[:,0] # Turn the 2D array back to a 1D array
+scaled_data = scaled_data[:, 0]  # Turn the 2D array back to a 1D array
 # Prepare the data
 for x in range(PREDICTION_DAYS, len(scaled_data)):
-    x_train.append(scaled_data[x-PREDICTION_DAYS:x])
+    x_train.append(scaled_data[x - PREDICTION_DAYS:x])
     y_train.append(scaled_data[x])
 
 # Convert them into an array
@@ -90,15 +171,15 @@ x_train = np.reshape(x_train, (x_train.shape[0], x_train.shape[1], 1))
 # We now reshape x_train into a 3D array(p, q, 1); Note that x_train 
 # is an array of p inputs with each input being a 2D array 
 
-#------------------------------------------------------------------------------
+# ------------------------------------------------------------------------------
 # Build the Model
 ## TO DO:
-# 1) Check if data has been built before. 
+# 1) Check if data has been built before.
 # If so, load the saved data
 # If not, save the data into a directory
 # 2) Change the model to increase accuracy?
-#------------------------------------------------------------------------------
-model = Sequential() # Basic neural network
+# ------------------------------------------------------------------------------
+model = Sequential()  # Basic neural network
 # See: https://www.tensorflow.org/api_docs/python/tf/keras/Sequential
 # for some useful examples
 
@@ -133,7 +214,7 @@ model.add(Dropout(0.2))
 model.add(LSTM(units=50))
 model.add(Dropout(0.2))
 
-model.add(Dense(units=1)) 
+model.add(Dense(units=1))
 # Prediction of the next closing value of the stock price
 
 # We compile the model by specify the parameters for the model
@@ -142,7 +223,7 @@ model.compile(optimizer='adam', loss='mean_squared_error')
 # The optimizer and loss are two important parameters when building an 
 # ANN model. Choosing a different optimizer/loss can affect the prediction
 # quality significantly. You should try other settings to learn; e.g.
-    
+
 # optimizer='rmsprop'/'sgd'/'adadelta'/...
 # loss='mean_absolute_error'/'huber_loss'/'cosine_similarity'/...
 
@@ -170,21 +251,21 @@ model.fit(x_train, y_train, epochs=25, batch_size=32)
 # your pre-trained model and run it on the new input for which the prediction
 # need to be made.
 
-#------------------------------------------------------------------------------
+# ------------------------------------------------------------------------------
 # Test the model accuracy on existing data
-#------------------------------------------------------------------------------
+# ------------------------------------------------------------------------------
 # Load the test data
 TEST_START = '2020-01-02'
 TEST_END = '2022-12-31'
 
-test_data = yf.download(COMPANY, start=TRAIN_START, end=TRAIN_END, progress=False)
+test_data = yf.download(TICK, start=TRAIN_START, end=TRAIN_END, progress=False)
 
 # The above bug is the reason for the following line of code
 test_data = test_data[1:]
 
 actual_prices = test_data[PRICE_VALUE].values
 
-total_dataset = pd.concat((data[PRICE_VALUE], test_data[PRICE_VALUE]), axis=0)
+total_dataset = pd.concat((train_d[PRICE_VALUE], test_data[PRICE_VALUE]), axis=0)
 
 model_inputs = total_dataset[len(total_dataset) - len(test_data) - PREDICTION_DAYS:].values
 # We need to do the above because to predict the closing price of the fisrt
@@ -208,9 +289,9 @@ model_inputs = scaler.transform(model_inputs)
 # can use part of it for training and the rest for testing. You need to 
 # implement such a way
 
-#------------------------------------------------------------------------------
+# ------------------------------------------------------------------------------
 # Make predictions on test data
-#------------------------------------------------------------------------------
+# ------------------------------------------------------------------------------
 x_test = []
 for x in range(PREDICTION_DAYS, len(model_inputs)):
     x_test.append(model_inputs[x - PREDICTION_DAYS:x, 0])
@@ -223,25 +304,25 @@ predicted_prices = model.predict(x_test)
 predicted_prices = scaler.inverse_transform(predicted_prices)
 # Clearly, as we transform our data into the normalized range (0,1),
 # we now need to reverse this transformation 
-#------------------------------------------------------------------------------
+# ------------------------------------------------------------------------------
 # Plot the test predictions
 ## To do:
 # 1) Candle stick charts
 # 2) Chart showing High & Lows of the day
 # 3) Show chart of next few days (predicted)
-#------------------------------------------------------------------------------
+# ------------------------------------------------------------------------------
 
-plt.plot(actual_prices, color="black", label=f"Actual {COMPANY} Price")
-plt.plot(predicted_prices, color="green", label=f"Predicted {COMPANY} Price")
-plt.title(f"{COMPANY} Share Price")
+plt.plot(actual_prices, color="black", label=f"Actual {TICK} Price")
+plt.plot(predicted_prices, color="green", label=f"Predicted {TICK} Price")
+plt.title(f"{TICK} Share Price")
 plt.xlabel("Time")
-plt.ylabel(f"{COMPANY} Share Price")
+plt.ylabel(f"{TICK} Share Price")
 plt.legend()
 plt.show()
 
-#------------------------------------------------------------------------------
+# ------------------------------------------------------------------------------
 # Predict next day
-#------------------------------------------------------------------------------
+# ------------------------------------------------------------------------------
 
 
 real_data = [model_inputs[len(model_inputs) - PREDICTION_DAYS:, 0]]
