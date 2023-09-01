@@ -11,14 +11,15 @@ import numpy as np
 import matplotlib.pyplot as plt
 import pandas as pd
 import pandas_datareader as web
-import datetime as dt
 import tensorflow as tf
-import yfinance as yahoo
 import yfinance as yf
 import os
 import pickle
 
 from datetime import datetime
+
+from matplotlib.dates import DateFormatter, date2num
+from mpl_finance import candlestick_ohlc
 from sklearn.preprocessing import MinMaxScaler
 from tensorflow.keras.models import Sequential
 from tensorflow.keras.layers import Dense, Dropout, LSTM, InputLayer
@@ -40,11 +41,11 @@ from sklearn.preprocessing import StandardScaler
 DATA_SOURCE = 'yahoo'  # Directory where data will be saved or loaded from
 TICK = 'AMZN'  # Stock ticker symbol
 TRAIN_START = datetime.strptime('2020-01-01', '%Y-%m-%d').date()  # Start date for data retrieval
-TRAIN_END = datetime.strptime('2023-01-01', '%Y-%m-%d').date()  # End date for data retrieval
+TRAIN_END = datetime.strptime('2023-08-08', '%Y-%m-%d').date()  # End date for data retrieval
 VERSION = "3"  # Version of data to be saved
 TRAIN_TEST_RATIO = 0.8  # Ratio of training data to total data
 SPLIT_METHOD = 'date'  # Method for splitting data ('date' or 'random')
-SCALE_FEATURES = False  # Whether to scale the feature columns
+SCALE_FEATURES = False  # Whether to scale the feature columns ('False' or 'True')
 
 
 # data = yf.download(TICK, start=TRAIN_START, end=TRAIN_END)
@@ -150,7 +151,7 @@ scaled_data = scaler.fit_transform(train_d[PRICE_VALUE].values.reshape(-1, 1))
 # given to reshape so as to maintain the same number of elements.
 
 # Number of days to look back to base the prediction
-PREDICTION_DAYS = 60  # Original
+PREDICTION_DAYS = 30  # Original
 
 # To store the training data
 x_train = []
@@ -255,7 +256,7 @@ model.fit(x_train, y_train, epochs=25, batch_size=32)
 # Test the model accuracy on existing data
 # ------------------------------------------------------------------------------
 # Load the test data
-TEST_START = '2020-01-02'
+TEST_START = '2022-01-02'
 TEST_END = '2022-12-31'
 
 test_data = yf.download(TICK, start=TRAIN_START, end=TRAIN_END, progress=False)
@@ -302,6 +303,8 @@ x_test = np.reshape(x_test, (x_test.shape[0], x_test.shape[1], 1))
 
 predicted_prices = model.predict(x_test)
 predicted_prices = scaler.inverse_transform(predicted_prices)
+
+
 # Clearly, as we transform our data into the normalized range (0,1),
 # we now need to reverse this transformation 
 # ------------------------------------------------------------------------------
@@ -311,9 +314,101 @@ predicted_prices = scaler.inverse_transform(predicted_prices)
 # 2) Chart showing High & Lows of the day
 # 3) Show chart of next few days (predicted)
 # ------------------------------------------------------------------------------
+            ## START OF B.3 candlestick and boxplot ##
 
+            ##############################
+            # Start of Candlestick Graph #
+            ##############################
+# Convert the index of the DataFrame to Python datetime objects
+test_d.index = test_d.index.to_pydatetime()
+
+# Create candlestick bars
+# Create a list to hold the OHLC (Open, High, Low, Close) data for the candlestick chart
+ohlc_data = []
+
+# Iterate through each row in the test_d DataFrame
+for date, row in test_d.iterrows():
+    # Convert the data to a numerical format required by candlestick_ohlc function
+    # Extract the OHLC values from the row, Create an OHLC tuple and add it to the ohlc_data list
+    ohlc = [date2num(date), row['Open'], row['High'], row['Low'], row['Close']]
+    ohlc_data.append(ohlc)
+
+# Create a subplot with a specified figure size
+fig, ax = plt.subplots(figsize=(10, 6))
+
+# Generate the candlestick chart using the ohlc_data
+candlestick_ohlc(ax, ohlc_data, width=0.6, colorup='g', colordown='r')
+
+# Plot the candlestick chart
+# Format the x-axis labels with the year-month-day format
+ax.xaxis.set_major_formatter(DateFormatter('%Y-%m-%d'))
+# Set the title, x-axis label, and y-axis label
+ax.set_title(f'Candlestick Chart for {TICK}')
+ax.set_xlabel('Date')
+ax.set_ylabel('Price')
+# Plot the actual closing and opening prices on th chart
+ax.plot(test_d.index, test_d['Close'], label='Closing Price', color='black')
+ax.plot(test_d.index, test_d['Open'], label='Opening Price', color='blue')
+# Add a legend to the chart
+ax.legend()
+# Display grid lines on the chart
+ax.grid()
+# Adjust the layout for a better display
+plt.tight_layout()
+# Show the candlestick chart
+plt.show()
+            ######################
+            # END OF CANDLESTICK #
+            ######################
+
+            ####################
+            # START OF BOXPLOT #
+            ####################
+#Boxplot graph, using test data:
+def plot_boxplot_chart(test_d, window_size=2):
+    # Calculate the number of moving windows
+    num_windows = len(test_d) - window_size + 1
+
+    # Create a figure and axis
+    fig, ax = plt.subplots(figsize=(10, 6))
+
+    # Initialize lists to store data for each window
+    window_data = []
+
+    # Loop through the moving windows
+    for i in range(num_windows):
+        # Extract data for the current window
+        window = test_d[i:i + window_size]
+        window_close = window['Close']
+
+        # Append window data to the list
+        window_data.append(window_close)
+
+    # Create a boxplot chart using the window data
+    ax.boxplot(window_data)
+
+    # Set labels and title
+    ax.set_xticklabels([str(i) for i in range(1, num_windows + 1)])
+    ax.set_xlabel('Moving Window')
+    ax.set_ylabel('Closing Price')
+    ax.set_title(f'Boxplot Graph for {TICK}')
+    # Ensure the chart layout is tight
+    plt.tight_layout()
+    # Show the boxplot chart
+    plt.show()
+
+# Call the function to plot the boxplot chart
+plot_boxplot_chart(test_d)
+
+            ##################
+            # END OF BOXPLOT #
+            ##################
+
+
+
+#Original graph, with line tick plotting:
 plt.plot(actual_prices, color="black", label=f"Actual {TICK} Price")
-plt.plot(predicted_prices, color="green", label=f"Predicted {TICK} Price")
+plt.plot(predicted_prices, color="red", label=f"Predicted {TICK} Price")
 plt.title(f"{TICK} Share Price")
 plt.xlabel("Time")
 plt.ylabel(f"{TICK} Share Price")
