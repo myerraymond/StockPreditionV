@@ -1,0 +1,73 @@
+I conducted research around which DL network would be most appropriate for financial data and stock prediction.
+
+# Long Short-Term Memory (LSTM)
+The use of LSTM as an architecture for predicting stock prices works well for the following reasons:
+    1. Handling Sequential Data: In rare cases, the stock market and financial analysis
+    follows a sequential pattern. More often then not there is a correlation between
+    the historical prices and future prices. LSTMs are designed to handle sequential data
+    and can capture these patterns.
+    2. Long-Term Dependencies: LSTMs are effective at capturing long-term dependencies within the financial data.
+    Dependencies within finance can vary greatly, such as economic indicators, news events,
+    and market sentiment. LSTMs can learn to incorporate some of these dependencies from the past
+    into the current predictions. This means that LSTMs are highly effective at capturing complex and
+    evolving relationships.
+    3. Memory Cell: Within the LSTMs memory they can store and retrieve data over extended periods.
+    With this memory the model can maintain relevant historical data. For stock prediction it is crucial to take
+    all conditions into effect. These include conditions(of the price), price trends, and events.
+    4. Feature Extraction: LSTMs are able to automatically learn from inputted data. For stock
+    prediction this is a very helpful feature because there is a vast amount of information
+    which is constantly changing. With the new inputs LSTMs can extract meaningful features, including
+    feature engineering.
+    5. Adaptability to Various Data Frequencies: LSTM is able to handle various data sizes, in the context of markets
+    this can consist of daily, hourly, minute-by-minute data. This is crucial when trying to find correlations
+    in the market, as not all data will be in the same frequency.
+    6. Ensemble Techniques: LSTMs can be combined with other machine learning techniques and models to create ensemble models.
+    This can be seen in the link below, where GRU-LSTM was connected to create a hybrid network. This network was used
+    to predict "Foreign exchange currency rate..".
+    7. Regularization and Dropout: Dropout is the process of reducing overfitting by preventing
+    complex co-adaptions of training data. Noisy data and changing market conditions can lead to models running into issues.
+
+# Gated Recurrent Unit (GRU)
+Next we will explore the use of GRU which is a recurrent neural network (RNN):
+    1. Handling Sequential Data: The financial data required for predicting stock prices is subject to  being
+    sequential in nature. GRUs are designed to model sequences effectively. GRUs have the ability to capture
+    dependencies and patterns within the data.
+    2. Short-Term Memory: Similarly to LSTMs, GRUs have a built-in ability to capture short-term dependencies in data.
+    GRUs have an excellent ability at capturing many rapid changes without forgetting relevant information
+    from the past data.
+    3. Avoid Vanishing Gradient Problem: Commonly RNNs suffer from vanishing gradient problems. GRUs are designed to
+    withstand this challenge. These are called gates (update gate and reset gate) that help aid this problem, for
+    long-term and short-term dependencies.
+    4. Computational Efficiency: GRUs are computationally more efficient than LSTMs, this efficiency is crucial when
+    dealing with large datasets, which is a common occurrence in financial datasets.
+    5. Reduced Overfitting: GRUs tend to require fewer parameters compared to LSTMs. This can be very beneficial
+    for avoiding overfitting within the dataset.
+    6. Real-time Predictions: GRUs are very efficient at real-time predictions, making them suitable for high-frequency
+    trading. The ability to update internally allows for responsive predictions with new data when it becomes available.
+    7. Adaptability to Features: GRUs are able to include additional features, such as market indicators,
+    economic data, or news sentiment, alongside the price and volume data. This is extremely useful fo creating complex
+    models that can incorporate a wide range of information and data sources.
+    8. Transfer Learning: Specification is crucial when analyzing stock prediction, by being able to fine-tune the model
+    we are able to accelerate the models return.
+
+## Foreign exchange currency rate prediction using GRU-LSTM hybrid network:
+https://www.sciencedirect.com/science/article/pii/S2666222120300083?via%3Dihub
+
+
+## An interesting article about LSTM and GRU based training strategy adapted to the Moroccan market.
+    In this paper a strategy is presented for the Moroccan stock market, the interesting part of the strategy is the using
+    LSTM and GRU neural networks. The goal of the strategy is common to many stock prediction goals, which is, predicting
+    short and medium-term stock prices, using LSTM for short-term and GRU for medium-term
+    predictions.
+    The strategy is to buy and sell based on forecasts generated by the outlined models. Over the designated time periods
+    the strategy will be tested and effectiveness throughout the terms. The stocks will only be held if they outperform
+    the benchmark index is met. To optimize the strategy, a random search will be used to select the best parameters for
+    the decision rules. This process is repeated for different portfolio sizes to find the
+    ideal combination of stocks with the most optimized parameters.
+    The results of this strategy are highly promising, consistently outperforming the benchmark indices in the Moroccan
+    stock market. During the test period, the annualized return for the proposed strategy is an impressive 27.13%, while
+    benchmark indices like the Moroccan all share index (MASI) only achieves 0.43%, the distributor sector index
+    achieves 15.24%, and the pharmaceutical industry index reaches 19.94%. Additionally, brokerage fees are considered,
+    enhancing the realism of the performance results.
+
+https://journalofbigdata.springeropen.com/articles/10.1186/s40537-021-00512-z

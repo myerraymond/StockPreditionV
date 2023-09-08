@@ -10,21 +10,37 @@
 import numpy as np
 import matplotlib.pyplot as plt
 import pandas as pd
-import pandas_datareader as web
-import tensorflow as tf
 import yfinance as yf
 import os
 import pickle
-
-from datetime import datetime
 
 from matplotlib.dates import DateFormatter, date2num
 from mpl_finance import candlestick_ohlc
 from sklearn.preprocessing import MinMaxScaler
 from tensorflow.keras.models import Sequential
-from tensorflow.keras.layers import Dense, Dropout, LSTM, InputLayer
+from tensorflow.keras.layers import Dense, Dropout, LSTM, InputLayer, RNN, GRU
 from sklearn.model_selection import train_test_split
 from sklearn.preprocessing import StandardScaler
+
+from parameters import prediction_days
+from parameters import version
+from parameters import tick
+from parameters import train_end
+from parameters import train_start
+from parameters import data_source
+from parameters import train_test_ratio
+from parameters import split_method
+from parameters import scale_features
+from parameters import price_value
+from parameters import test_start
+from parameters import test_end
+
+
+# from parameters import lstm_units
+# from parameters import dropout_rate
+# from parameters import num_epochs
+# from parameters import batch_size
+
 
 # ------------------------------------------------------------------------------
 # Load Data
@@ -34,30 +50,17 @@ from sklearn.preprocessing import StandardScaler
 # If not, save the data into a directory
 # ------------------------------------------------------------------------------
 
-# Parameters
 
-# TASK B.2 START LINE 38 - 118
-
-DATA_SOURCE = 'yahoo'  # Directory where data will be saved or loaded from
-TICK = 'AMZN'  # Stock ticker symbol
-TRAIN_START = datetime.strptime('2020-01-01', '%Y-%m-%d').date()  # Start date for data retrieval
-TRAIN_END = datetime.strptime('2023-08-08', '%Y-%m-%d').date()  # End date for data retrieval
-VERSION = "3"  # Version of data to be saved
-TRAIN_TEST_RATIO = 0.8  # Ratio of training data to total data
-SPLIT_METHOD = 'date'  # Method for splitting data ('date' or 'random')
-SCALE_FEATURES = False  # Whether to scale the feature columns ('False' or 'True')
-
-
-# data = yf.download(TICK, start=TRAIN_START, end=TRAIN_END)
+# data = yf.download(tick, start=train_start, end=train_end)
 
 # Function to load or fetch data
-def load_data(DATA_SOURCE, TICK, TRAIN_START, TRAIN_END, TRAIN_TEST_RATIO, SPLIT_METHOD, SCALE_FEATURES):
+def load_data(data_source, tick, train_start, train_end, train_test_ratio, split_method, scale_features):
     # Check if the directory exists; if not, create it
-    if not os.path.exists(DATA_SOURCE):
-        os.makedirs(DATA_SOURCE)
+    if not os.path.exists(data_source):
+        os.makedirs(data_source)
 
     # Construct the file path for data saving/loading
-    file_path = os.path.join(DATA_SOURCE, f"{TICK}_v{VERSION}.txt")
+    file_path = os.path.join(data_source, f"{tick}_v{version}.txt")
 
     # Check if saved data exists; if yes, load it; if not, fetch from Yahoo Finance
     if os.path.exists(file_path):
@@ -66,7 +69,7 @@ def load_data(DATA_SOURCE, TICK, TRAIN_START, TRAIN_END, TRAIN_TEST_RATIO, SPLIT
         print("DATA loaded successfully.")
     else:
         # Load data from Yahoo Finance
-        data = yf.download(TICK, start=TRAIN_START, end=TRAIN_END)
+        data = yf.download(tick, start=train_start, end=train_end)
 
         # Handle NaN values using forward filling
         data = data.ffill().dropna()
@@ -76,39 +79,43 @@ def load_data(DATA_SOURCE, TICK, TRAIN_START, TRAIN_END, TRAIN_TEST_RATIO, SPLIT
             pickle.dump(data, file)
         print("Data saved successfully.")
 
-    # Split data into train and test sets based on the value {SPLIT_METHOD}
-    if SPLIT_METHOD == 'date':
+    # Split data into train and test sets based on the value {split_method}
+    if split_method == 'date':
         # If split method is 'date', calculate the date for the end of the training time
-        train_end_date = TRAIN_START + pd.DateOffset(days=int((TRAIN_END - TRAIN_START).days * TRAIN_TEST_RATIO))
+        train_end_date = train_start + pd.DateOffset(days=int((train_end - train_start).days * train_test_ratio))
         # Extract the data for the training period (from TRAIN_START to train_end_date)
-        train_d = data[TRAIN_START:train_end_date]
+        train_d = data[train_start:train_end_date]
         # Extract the data for the testing period (from train_end_date to TRAIN_END)
-        test_d = data[train_end_date:TRAIN_END]
-    elif SPLIT_METHOD == 'random':
+        test_d = data[train_end_date:train_end]
+    elif split_method == 'random':
         # If split method is 'random', use train_test_split to split the data randomly
         # The train_size parameter specifies the ratio of training data
         # The shuffle parameter is set too False to maintain order of the data
 
-        train_d, test_d = train_test_split(data, train_size=TRAIN_TEST_RATIO, shuffle=False)
+        train_d, test_d = train_test_split(data, train_size=train_test_ratio, shuffle=False)
     else:
         # If an invalid split method is specified, raise a ValueError
         raise ValueError("Invalid split method specified.")
 
     # Scale feature columns if specified
     scalers = {}
-    if SCALE_FEATURES:
+    if scale_features:
         feature_columns = train_d.columns
         scaler = StandardScaler()  # Instantiate StandardScaler object, removing the mean, scaling to unit variance
         train_d[feature_columns] = scaler.fit_transform(train_d[feature_columns])  # Fit and transform training data
         test_d[feature_columns] = scaler.transform(test_d[feature_columns])  # Transform test data using the same scaler
         scalers['feature'] = scaler  # Store the scaler in the dictionary
 
+    if not scalers:
+        scalers['feature'] = None
+        scalers['target'] = None
+
     return train_d, test_d, scalers
 
 
 # Load data using the load_data function
-train_d, test_d, scalers = load_data(DATA_SOURCE, TICK, TRAIN_START, TRAIN_END, TRAIN_TEST_RATIO, SPLIT_METHOD,
-                                     SCALE_FEATURES)
+train_d, test_d, scalers = load_data(data_source, tick, train_start, train_end, train_test_ratio, split_method,
+                                     scale_features)
 print("Train Data: ")
 print(train_d)
 print("Test Data: ")
@@ -129,12 +136,11 @@ print(scalers)
 # 2) Use a different price value eg. mid-point of Open & Close
 # 3) Change the Prediction days
 # ------------------------------------------------------------------------------
-PRICE_VALUE = "Close"
 
 scaler = MinMaxScaler(feature_range=(0, 1))
 # Note that, by default, feature_range=(0, 1). Thus, if you want a different 
 # feature_range (min,max) then you'll need to specify it here
-scaled_data = scaler.fit_transform(train_d[PRICE_VALUE].values.reshape(-1, 1))
+scaled_data = scaler.fit_transform(train_d[price_value].values.reshape(-1, 1))
 # Flatten and normalise the data
 # First, we reshape a 1D array(n) to 2D array(n,1)
 # We have to do that because sklearn.preprocessing.fit_transform()
@@ -150,8 +156,6 @@ scaled_data = scaler.fit_transform(train_d[PRICE_VALUE].values.reshape(-1, 1))
 # the dimensions of the original array divided by the product of the dimensions 
 # given to reshape so as to maintain the same number of elements.
 
-# Number of days to look back to base the prediction
-PREDICTION_DAYS = 30  # Original
 
 # To store the training data
 x_train = []
@@ -159,17 +163,19 @@ y_train = []
 
 scaled_data = scaled_data[:, 0]  # Turn the 2D array back to a 1D array
 # Prepare the data
-for x in range(PREDICTION_DAYS, len(scaled_data)):
-    x_train.append(scaled_data[x - PREDICTION_DAYS:x])
+for x in range(prediction_days, len(scaled_data)):
+    x_train.append(scaled_data[x - prediction_days:x])
     y_train.append(scaled_data[x])
 
 # Convert them into an array
 x_train, y_train = np.array(x_train), np.array(y_train)
-# Now, x_train is a 2D array(p,q) where p = len(scaled_data) - PREDICTION_DAYS
-# and q = PREDICTION_DAYS; while y_train is a 1D array(p)
+# Now, x_train is a 2D array(p,q) where p = len(scaled_data) - prediction_days
+# and q = prediction_days; while y_train is a 1D array(p)
 
 x_train = np.reshape(x_train, (x_train.shape[0], x_train.shape[1], 1))
-# We now reshape x_train into a 3D array(p, q, 1); Note that x_train 
+
+
+# We now reshape x_train into a 3D array(p, q, 1); Note that x_train
 # is an array of p inputs with each input being a 2D array 
 
 # ------------------------------------------------------------------------------
@@ -180,6 +186,183 @@ x_train = np.reshape(x_train, (x_train.shape[0], x_train.shape[1], 1))
 # If not, save the data into a directory
 # 2) Change the model to increase accuracy?
 # ------------------------------------------------------------------------------
+#
+## Function to build a deep learning model with GRU layers
+# def build_deep_learning_model_with_gru(layers, layer_sizes, layer_names, input_shape):
+#     ## Check if the input lists have the same length, optional task
+#     if len(layers) != len(layer_sizes) or len(layers) != len(layer_names):
+#         raise ValueError("The number of layers, layer_sizes, and layer_names must match.")
+#
+## Create a Sequential model
+#     model = Sequential()
+#
+## Loop through the specific layers
+#     for i in range(len(layers)):
+#         layer_name = layer_names[i]
+#         layer_size = layer_sizes[i]
+#
+#         if layers[i] == "GRU":
+## Add a GRU layer
+#             print(f"Adding GRU layer with units={layer_size}, return_sequences=True, input_shape={input_shape}, name={layer_name}")
+#             model.add(GRU(units=layer_size, return_sequences=True, input_shape=input_shape, name=layer_name))
+#         elif layers[i] == "Dropout":
+## Add a Dropout layer
+#             print(f"Adding Dropout layer with rate={layer_size}, name={layer_name}")
+#             model.add(Dropout(layer_size, name=layer_name))
+#         elif layers[i] == "Dense":
+## Add a Dense (fully connected) layer
+#             print(f"Adding Dense layer with units={layer_size}, name={layer_name}")
+#             model.add(Dense(units=layer_size, name=layer_name))
+#
+#     return model
+#
+## Function to predict stock prices using GRU model
+# def predict_stock_prices_with_gru(tick, test_start, test_end, prediction_days=1, model=None):
+#     # Download historical stock data
+#     data = yf.download(tick, start=test_start, end=test_end, progress=False)
+#
+#     # Prepare the data using Min-Max scaling
+#     scaler = MinMaxScaler(feature_range=(0, 1))
+#     scaled_data = scaler.fit_transform(data['Close'].values.reshape(-1, 1))
+#
+## Prepare the input data for the GRU model
+#     x_test = []
+#     for x in range(prediction_days, len(scaled_data)):
+#         x_test.append(scaled_data[x - prediction_days:x, 0])
+#
+#     x_test = np.array(x_test)
+#     x_test = np.reshape(x_test, (x_test.shape[0], x_test.shape[1], 1))
+#
+#     # Build the GRU model if not provided
+#     if model is None:
+#         print("Building GRU model...")
+#         model = build_deep_learning_model_with_gru(layers=["GRU", "Dropout", "GRU", "Dropout", "GRU", "Dropout", "Dense"],
+#                                                   layer_sizes=[50, 0.2, 50, 0.2, 50, 0.2, 1],
+#                                                   layer_names=["gru1", "dropout1", "gru2", "dropout2", "gru3", "dropout3",
+#                                                                "dense1"],
+#                                                   input_shape=(x_test.shape[1], 1))
+#         # Compile the model
+#         print("Compiling the model...")
+#         model.compile(optimizer='adam', loss='mean_squared_error')
+#
+#         # Load pre-trained weights if available
+#         model_weights_path = f"{tick}_model_weights_gru.h5"
+#         if os.path.exists(model_weights_path):
+#             print("Loading pre-trained weights...")
+#             model.load_weights(model_weights_path)
+#
+#     # Predict the stock prices
+#     print("Predicting stock prices with GRU...")
+#     predicted_prices = model.predict(x_test)
+#     predicted_prices = predicted_prices.reshape(-1, 1)  # Flatten and reshape
+#
+#     predicted_prices = scaler.inverse_transform(predicted_prices)
+#
+#     # Predict the next day's closing price
+#     real_data = [scaled_data[len(scaled_data) - prediction_days:, 0]]
+#     real_data = np.array(real_data)
+#     real_data = np.reshape(real_data, (real_data.shape[0], real_data.shape[1], 1))
+#
+#     next_day_prediction = model.predict(real_data)
+#     next_day_prediction = next_day_prediction.reshape(-1, 1)  # Flatten and reshape
+#
+#     next_day_prediction = scaler.inverse_transform(next_day_prediction)
+#
+#     return predicted_prices, next_day_prediction[0][0]
+#
+# predicted_prices, next_day_prediction = predict_stock_prices_with_gru(tick, train_start, train_end)
+
+# Function to build a deep learning model
+def build_deep_learning_model(layers, layer_sizes, layer_names, input_shape):
+    # Check if the input lists have the same length
+    if len(layers) != len(layer_sizes) or len(layers) != len(layer_names):
+        raise ValueError("The number of layers, layer_sizes, and layer_names must match.")
+
+    # Create a Sequential model
+    model = Sequential()
+
+    # Loop through the specified layers
+    for i in range(len(layers)):
+        layer_name = layer_names[i]
+        layer_size = layer_sizes[i]
+
+        if layers[i] == "LSTM":
+            # Add an LSTM layerr
+            print(
+                f"Adding LSTM layer with units={layer_size}, return_sequences=True, input_shape={input_shape}, name={layer_name}")
+            model.add(LSTM(units=layer_size, return_sequences=True, input_shape=input_shape, name=layer_name))
+        elif layers[i] == "Dropout":
+            # Add a Droupout layer
+            print(f"Adding Dropout layer with rate={layer_size}, name={layer_name}")
+            model.add(Dropout(layer_size, name=layer_name))
+        elif layers[i] == "Dense":
+            # Add a Dense (fully connected) layer
+            print(f"Adding Dense layer with units={layer_size}, name={layer_name}")
+            model.add(Dense(units=layer_size, name=layer_name))
+
+    return model
+
+
+# Function to predict stock prices
+def predict_stock_prices(tick, test_start, test_end, prediction_days=1, model=None):
+    # Download historical stock data
+    data = yf.download(tick, start=test_start, end=test_end, progress=False)
+
+    # Prepare the data using Min-Max scaling
+    scaler = MinMaxScaler(feature_range=(0, 1))
+    scaled_data = scaler.fit_transform(data['Close'].values.reshape(-1, 1))
+
+    # Prepare the input data for the LSTM model
+    x_test = []
+    for x in range(prediction_days, len(scaled_data)):
+        x_test.append(scaled_data[x - prediction_days:x, 0])
+
+    x_test = np.array(x_test)
+    x_test = np.reshape(x_test, (x_test.shape[0], x_test.shape[1], 1))
+
+    # Build the LSTM model if not provided
+    if model is None:
+        print("Building LSTM model...")
+        model = build_deep_learning_model(layers=["LSTM", "Dropout", "LSTM", "Dropout", "LSTM", "Dropout", "Dense"],
+                                          layer_sizes=[50, 0.2, 50, 0.2, 50, 0.2, 1],
+                                          layer_names=["lstm1", "dropout1", "lstm2", "dropout2", "lstm3", "dropout3",
+                                                       "dense1"],
+                                          input_shape=(x_test.shape[1], 1))
+        # Compile the model
+        print("Compiling the model...")
+        model.compile(optimizer='adam', loss='mean_squared_error')
+
+        # Load pre-trained weights if available
+        model_weights_path = f"{tick}_model_weights.h5"
+        if os.path.exists(model_weights_path):
+            print("Loading pre-trained weights...")
+            model.load_weights(model_weights_path)
+
+    # Predict the stock prices
+    print("Predicting stock prices...")
+    predicted_prices = model.predict(x_test)
+    predicted_prices = predicted_prices.reshape(-1, 1)  # Flatten and reshape
+
+    predicted_prices = scaler.inverse_transform(predicted_prices)
+
+    # Predict the next day's closing price
+    real_data = [scaled_data[len(scaled_data) - prediction_days:, 0]]
+    real_data = np.array(real_data)
+    real_data = np.reshape(real_data, (real_data.shape[0], real_data.shape[1], 1))
+
+    next_day_prediction = model.predict(real_data)
+    next_day_prediction = next_day_prediction.reshape(-1, 1)  # Flatten and reshape
+
+    next_day_prediction = scaler.inverse_transform(next_day_prediction)
+
+    return predicted_prices, next_day_prediction[0][0]
+
+# Usage
+predicted_prices, next_day_prediction = predict_stock_prices(tick, train_start, train_end)
+#
+print(f"Predicted Prices for the next {prediction_days} days: {predicted_prices}")
+print(f"Predicted Price for the next day: {next_day_prediction}")
+
 model = Sequential()  # Basic neural network
 # See: https://www.tensorflow.org/api_docs/python/tf/keras/Sequential
 # for some useful examples
@@ -191,7 +374,7 @@ model.add(LSTM(units=50, return_sequences=True, input_shape=(x_train.shape[1], 1
 # The above would be equivalent to the following two lines of code:
 # model.add(InputLayer(input_shape=(x_train.shape[1], 1)))
 # model.add(LSTM(units=50, return_sequences=True))
-# For som eadvances explanation of return_sequences:
+# For some advances explanation of return_sequences:
 # https://machinelearningmastery.com/return-sequences-and-return-states-for-lstms-in-keras/
 # https://www.dlology.com/blog/how-to-use-return_state-or-return_sequences-in-keras/
 # As explained there, for a stacked LSTM, you must set return_sequences=True 
@@ -256,21 +439,19 @@ model.fit(x_train, y_train, epochs=25, batch_size=32)
 # Test the model accuracy on existing data
 # ------------------------------------------------------------------------------
 # Load the test data
-TEST_START = '2022-01-02'
-TEST_END = '2022-12-31'
 
-test_data = yf.download(TICK, start=TRAIN_START, end=TRAIN_END, progress=False)
+test_data = yf.download(tick, start=test_start, end=test_end, progress=False)
 
 # The above bug is the reason for the following line of code
 test_data = test_data[1:]
 
-actual_prices = test_data[PRICE_VALUE].values
+actual_prices = test_data[price_value].values
 
-total_dataset = pd.concat((train_d[PRICE_VALUE], test_data[PRICE_VALUE]), axis=0)
+total_dataset = pd.concat((train_d[price_value], test_data[price_value]), axis=0)
 
-model_inputs = total_dataset[len(total_dataset) - len(test_data) - PREDICTION_DAYS:].values
-# We need to do the above because to predict the closing price of the fisrt
-# PREDICTION_DAYS of the test period [TEST_START, TEST_END], we'll need the 
+model_inputs = total_dataset[len(total_dataset) - len(test_data) - prediction_days:].values
+# We need to do the above because to predict the closing price of the first
+# prediction_days of the test period [test_start, test_end], we'll need the
 # data from the training period
 
 model_inputs = model_inputs.reshape(-1, 1)
@@ -280,9 +461,9 @@ model_inputs = scaler.transform(model_inputs)
 # We again normalize our closing price data to fit them into the range (0,1)
 # using the same scaler used above 
 # However, there may be a problem: scaler was computed on the basis of
-# the Max/Min of the stock price for the period [TRAIN_START, TRAIN_END],
+# the Max/Min of the stock price for the period [train_start, train_end],
 # but there may be a lower/higher price during the test period 
-# [TEST_START, TEST_END]. That can lead to out-of-bound values (negative and
+# [test_start, test_end]. That can lead to out-of-bound values (negative and
 # greater than one)
 # We'll call this ISSUE #2
 
@@ -294,8 +475,8 @@ model_inputs = scaler.transform(model_inputs)
 # Make predictions on test data
 # ------------------------------------------------------------------------------
 x_test = []
-for x in range(PREDICTION_DAYS, len(model_inputs)):
-    x_test.append(model_inputs[x - PREDICTION_DAYS:x, 0])
+for x in range(prediction_days, len(model_inputs)):
+    x_test.append(model_inputs[x - prediction_days:x, 0])
 
 x_test = np.array(x_test)
 x_test = np.reshape(x_test, (x_test.shape[0], x_test.shape[1], 1))
@@ -303,7 +484,6 @@ x_test = np.reshape(x_test, (x_test.shape[0], x_test.shape[1], 1))
 
 predicted_prices = model.predict(x_test)
 predicted_prices = scaler.inverse_transform(predicted_prices)
-
 
 # Clearly, as we transform our data into the normalized range (0,1),
 # we now need to reverse this transformation 
@@ -314,11 +494,11 @@ predicted_prices = scaler.inverse_transform(predicted_prices)
 # 2) Chart showing High & Lows of the day
 # 3) Show chart of next few days (predicted)
 # ------------------------------------------------------------------------------
-            ## START OF B.3 candlestick and boxplot ##
+## START OF B.3 candlestick and boxplot ##
 
-            ##############################
-            # Start of Candlestick Graph #
-            ##############################
+##############################
+# Start of Candlestick Graph #
+##############################
 # Convert the index of the DataFrame to Python datetime objects
 test_d.index = test_d.index.to_pydatetime()
 
@@ -343,7 +523,7 @@ candlestick_ohlc(ax, ohlc_data, width=0.6, colorup='g', colordown='r')
 # Format the x-axis labels with the year-month-day format
 ax.xaxis.set_major_formatter(DateFormatter('%Y-%m-%d'))
 # Set the title, x-axis label, and y-axis label
-ax.set_title(f'Candlestick Chart for {TICK}')
+ax.set_title(f'Candlestick Chart for {tick}')
 ax.set_xlabel('Date')
 ax.set_ylabel('Price')
 # Plot the actual closing and opening prices on th chart
@@ -357,14 +537,16 @@ ax.grid()
 plt.tight_layout()
 # Show the candlestick chart
 plt.show()
-            ######################
-            # END OF CANDLESTICK #
-            ######################
 
-            ####################
-            # START OF BOXPLOT #
-            ####################
-#Boxplot graph, using test data:
+
+######################
+# END OF CANDLESTICK #
+######################
+
+####################
+# START OF BOXPLOT #
+####################
+# Boxplot graph, using test data:
 def plot_boxplot_chart(test_d, window_size=2):
     # Calculate the number of moving windows
     num_windows = len(test_d) - window_size + 1
@@ -391,27 +573,27 @@ def plot_boxplot_chart(test_d, window_size=2):
     ax.set_xticklabels([str(i) for i in range(1, num_windows + 1)])
     ax.set_xlabel('Moving Window')
     ax.set_ylabel('Closing Price')
-    ax.set_title(f'Boxplot Graph for {TICK}')
+    ax.set_title(f'Boxplot Graph for {tick}')
     # Ensure the chart layout is tight
     plt.tight_layout()
     # Show the boxplot chart
     plt.show()
 
+
 # Call the function to plot the boxplot chart
 plot_boxplot_chart(test_d)
 
-            ##################
-            # END OF BOXPLOT #
-            ##################
+##################
+# END OF BOXPLOT #
+##################
 
 
-
-#Original graph, with line tick plotting:
-plt.plot(actual_prices, color="black", label=f"Actual {TICK} Price")
-plt.plot(predicted_prices, color="red", label=f"Predicted {TICK} Price")
-plt.title(f"{TICK} Share Price")
+# Original graph, with line tick plotting:
+plt.plot(actual_prices, color="black", label=f"Actual {tick} Price")
+plt.plot(predicted_prices, color="red", label=f"Predicted {tick} Price")
+plt.title(f"{tick} Share Price")
 plt.xlabel("Time")
-plt.ylabel(f"{TICK} Share Price")
+plt.ylabel(f"{tick} Share Price")
 plt.legend()
 plt.show()
 
@@ -420,7 +602,7 @@ plt.show()
 # ------------------------------------------------------------------------------
 
 
-real_data = [model_inputs[len(model_inputs) - PREDICTION_DAYS:, 0]]
+real_data = [model_inputs[len(model_inputs) - prediction_days:, 0]]
 real_data = np.array(real_data)
 real_data = np.reshape(real_data, (real_data.shape[0], real_data.shape[1], 1))
 
