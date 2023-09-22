@@ -687,7 +687,6 @@ multivariate_prediction = multivariate_prediction(train_d, k)
 
 print("Multistep Predictions:", multistep_predictions)
 print(f"Simple Multivariate Prediction for Day {k}:", multivariate_prediction)
-
 ## END OF B.5 ##
 
 
