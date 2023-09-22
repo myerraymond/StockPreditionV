@@ -21,6 +21,7 @@ from tensorflow.keras.models import Sequential
 from tensorflow.keras.layers import Dense, Dropout, LSTM, InputLayer, RNN, GRU
 from sklearn.model_selection import train_test_split
 from sklearn.preprocessing import StandardScaler
+from sklearn.linear_model import LinearRegression
 
 from parameters import prediction_days
 from parameters import version
@@ -357,6 +358,7 @@ def predict_stock_prices(tick, test_start, test_end, prediction_days=1, model=No
 
     return predicted_prices, next_day_prediction[0][0]
 
+
 # Usage
 predicted_prices, next_day_prediction = predict_stock_prices(tick, train_start, train_end)
 #
@@ -496,6 +498,12 @@ predicted_prices = scaler.inverse_transform(predicted_prices)
 # ------------------------------------------------------------------------------
 ## START OF B.3 candlestick and boxplot ##
 
+data_directory = "graphs_data"
+os.makedirs(data_directory, exist_ok=True)
+
+output_directory = os.path.join(data_directory, f"{tick}_{version}_{split_method}_{test_start}_{test_end}")
+os.makedirs(output_directory, exist_ok=True)
+
 ##############################
 # Start of Candlestick Graph #
 ##############################
@@ -538,6 +546,9 @@ plt.tight_layout()
 # Show the candlestick chart
 plt.show()
 
+candlestick_filename = os.path.join(output_directory, f'candlestick_chart.png')
+fig.savefig(candlestick_filename)
+
 
 ######################
 # END OF CANDLESTICK #
@@ -579,6 +590,9 @@ def plot_boxplot_chart(test_d, window_size=2):
     # Show the boxplot chart
     plt.show()
 
+    boxplot_filename = os.path.join(output_directory, f'boxplot_chart.png')
+    fig.savefig(boxplot_filename)
+
 
 # Call the function to plot the boxplot chart
 plot_boxplot_chart(test_d)
@@ -595,18 +609,99 @@ plt.title(f"{tick} Share Price")
 plt.xlabel("Time")
 plt.ylabel(f"{tick} Share Price")
 plt.legend()
+original_graph_filename = os.path.join(output_directory, f'original_graph.png')
+plt.savefig(original_graph_filename)
 plt.show()
+
 
 # ------------------------------------------------------------------------------
 # Predict next day
 # ------------------------------------------------------------------------------
+# TASK B.5 SOLVING MORE ADVANCED prediction problems. Including multivariate prediction and multistep prediction.
+
+#Define a function for multistep prediction using a trained model
+def multistep_prediction(train_d, k):
+    # Extract the 'Close' column values from the training data as a Numpy array
+    data = train_d[['Close']].values
+
+    # Scale the 'Close' values to a range between 0 and 1 using Min-Max scaling
+    data_scaled = scaler.fit_transform(data)
+
+    X, y = [], []
+
+    # Create sequences of length k as input (X) and the next value as the target (y)
+    for i in range(len(data_scaled) - k):
+        X.append(data_scaled[i:i + k])
+        y.append(data_scaled[i + k])
+
+    X, y = np.array(X), np.array(y)
+
+    # Predict k days into the future
+    predictions = []
+    current_sequence = X[-1]  # Start prediction from the end of the training data
+
+    for i in range(k):
+        # Predict the next value using the model
+        prediction = model.predict(current_sequence.reshape(1, k, 1))
+
+        # Inverse transform the scaled prediction to the original scale
+        # and extract the value from the Numpy array
+        predictions.append(scaler.inverse_transform(prediction)[0][0])
+
+        # Append the prediction to the list of predictions
+        predictions.append(prediction)
+
+        # Update the current sequence by removing the first element and adding the prediction
+        current_sequence = np.append(current_sequence[1:], prediction)
+
+    return predictions
+
+# Define a function for multistep prediction using linear regression
+def multivariate_prediction(train_d, k):
+    # Define the list of features to be used for the prediction
+    features = ['Open', 'High', 'Low', 'Close', 'Adj Close',
+                'Volume']
+
+    # Extract the feature values (X) and target values (y) from the training data
+    X = train_d[features].values
+    y = train_d['Close'].values
+
+    # Create a Linear Regression model
+    multivariate_model = LinearRegression()
+    # Fit the model to the training data, which means it learns the relationship between features and target
+    multivariate_model.fit(X, y)
+
+    # Predict the closing price k days into the future by using the last available data point
+    multi_prediction = multivariate_model.predict(X[-k].reshape(1, -1))
+
+    # Return the predicted closing price for the specified day in the future
+    return multi_prediction[0]
 
 
+# Example usage:
+k = 5  # Specify the number of days into the future for multistep prediction
+
+# Call the multistep_prediction and multivariate_prediction function.
+multistep_predictions = multistep_prediction(train_d, k)
+multivariate_prediction = multivariate_prediction(train_d, k)
+
+print("Multistep Predictions:", multistep_predictions)
+print(f"Simple Multivariate Prediction for Day {k}:", multivariate_prediction)
+
+## END OF B.5 ##
+
+
+# comments for old prediction model
+# Select the last 'prediction_days' elements from 'model_inputs' for prediction
 real_data = [model_inputs[len(model_inputs) - prediction_days:, 0]]
+# Convert the selected data into a Numpy array
 real_data = np.array(real_data)
+# Reshape the Numpy array to match the expected input shape of the model
 real_data = np.reshape(real_data, (real_data.shape[0], real_data.shape[1], 1))
 
+# Use the trained model to make a prediction on the real-data
 prediction = model.predict(real_data)
+# Inverse transform the scaled prediction to the original scale
 prediction = scaler.inverse_transform(prediction)
 print(f"Prediction: {prediction}")
 

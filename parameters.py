@@ -3,9 +3,9 @@ from datetime import datetime
 
 # Data Source
 data_source = 'yahoo'  # Directory where data will be saved or loaded from
-tick = 'META'  # Stock ticker symbol
-train_start = datetime.strptime('2015-01-01', '%Y-%m-%d').date()
-train_end = datetime.strptime('2020-01-01', '%Y-%m-%d').date()
+tick = 'F'  # Stock ticker symbol
+train_start = datetime.strptime('2020-01-01', '%Y-%m-%d').date()
+train_end = datetime.strptime('2022-01-01', '%Y-%m-%d').date()
 version = "1"  # Version of data to be saved
 train_test_ratio = 0.8  # Ratio of training data to total data
 split_method = 'random'  # Method for splitting data ('date' or 'random')
