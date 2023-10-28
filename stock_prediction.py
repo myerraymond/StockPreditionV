@@ -6,9 +6,10 @@
 # pip install scikit-learn
 # pip install pandas-datareader
 # pip install yfinance
+# pip install mpl_finance
+# pip install statsmodels
 
 import numpy as np
-import keras
 import matplotlib.pyplot as plt
 import pandas as pd
 import yfinance as yf
@@ -16,20 +17,21 @@ import os
 import pickle
 import statsmodels.api as sm
 import csv
+import http.client
+import json
 
 from matplotlib.dates import DateFormatter, date2num
 from mpl_finance import candlestick_ohlc
-from pandas.io.xml import preprocess_data
 from sklearn.ensemble import RandomForestRegressor
 from sklearn.preprocessing import MinMaxScaler
+from keras.models import Sequential
+from keras.layers import LSTM, Dense
 from tensorflow.keras.models import Sequential
 from tensorflow.keras.layers import Dense, Dropout, LSTM, InputLayer, RNN, GRU
 from sklearn.model_selection import train_test_split, GridSearchCV
 from sklearn.preprocessing import StandardScaler
 from sklearn.linear_model import LinearRegression
 from sklearn.metrics import mean_squared_error, mean_absolute_error
-from math import sqrt
-from statsmodels.tsa.arima.model import ARIMA as arima_model
 
 from parameters import prediction_days, lstm_units, num_epochs, batch_size, dropout_rate
 from parameters import version
@@ -43,7 +45,6 @@ from parameters import scale_features
 from parameters import price_value
 from parameters import test_start
 from parameters import test_end
-
 
 # from parameters import lstm_units
 # from parameters import dropout_rate
@@ -59,8 +60,127 @@ from parameters import test_end
 # If not, save the data into a directory
 # ------------------------------------------------------------------------------
 
-
 # data = yf.download(tick, start=train_start, end=train_end)
+
+# old weather data (for training) 2020-01-01 to 2020-12-31
+
+conn = http.client.HTTPSConnection("meteostat.p.rapidapi.com")
+
+headers = {
+    'X-RapidAPI-Key': "0e659a0823msh44ecc8789cfad4cp1a7e3ajsncb88eeb80b6e",
+    'X-RapidAPI-Host': "meteostat.p.rapidapi.com"
+}
+
+conn.request("GET", "/stations/daily?station=94868&start=2020-01-01&end=2022-01-24", headers=headers)
+
+res = conn.getresponse()
+data = res.read()
+
+decoded_data = data.decode("utf-8")
+
+# Parse the JSON data
+weather_data = json.loads(decoded_data)
+
+# Create a new list to store aggregated data
+aggregated_data = []
+
+# Iterate over the JSON data and extract the date and tavg values
+for item in weather_data["data"]:
+    date = item["date"]
+    tavg = item["tavg"]
+    aggregated_data.append({"date": date, "tavg": tavg})
+
+# Save the aggregated data to a JSON file
+with open("train_weather_data_aggregated.json", "w") as file:
+    json.dump(aggregated_data, file)
+
+print("Aggregated data saved to train_weather_data_aggregated.json")
+
+# If you want to access the aggregated data:
+date_values = [item["date"] for item in aggregated_data]
+tavg_values = [item["tavg"] for item in aggregated_data]
+
+# Print the date and tavg values
+print("Date values:")
+print(date_values)
+
+print("Tavg values:")
+print(tavg_values)
+
+# # Plot the data
+# plt.plot(date_values, tavg_values, color="black", label="Average Temperature")
+# plt.title("Average Temperature")
+# plt.xlabel("Date")
+# plt.ylabel("Average Temperature (C)")
+# plt.legend()
+#
+#
+#
+# # future weather data 16 days
+# import http.client
+#
+# conn = http.client.HTTPSConnection("weatherbit-v1-mashape.p.rapidapi.com")
+#
+# headers = {
+#     'X-RapidAPI-Key': "0e659a0823msh44ecc8789cfad4cp1a7e3ajsncb88eeb80b6e",
+#     'X-RapidAPI-Host': "weatherbit-v1-mashape.p.rapidapi.com"
+# }
+#
+# conn.request("GET", "/forecast/daily?lat=-37.840935&lon=144.946457", headers=headers)
+#
+# res = conn.getresponse()
+# data = res.read()
+#
+# print(data.decode("utf-8"))
+#
+# decoded_data = data.decode("utf-8")
+#
+# # Save the data to a JSON file
+# with open("future_weather_data.json", "w") as file:
+#     file.write(decoded_data)
+#
+# print("Data saved to future_weather_data.json")
+#
+#
+# import json
+#
+# # Open the JSON file.
+# with open("future_weather_data.json", "r") as f:
+#     weather_data = json.load(f)
+#
+# # Extract the dates and temperatures from the JSON data.
+# dates = []
+# temperatures = []
+#
+# for day in weather_data["data"]:
+#     date = day["datetime"]
+#     temperature = day["temp"]
+#
+#     dates.append(date)
+#     temperatures.append(temperature)
+#
+# # Create a dictionary to store the dates and temperatures.
+# weather_data = {}
+#
+# for i in range(len(dates)):
+#     weather_data[dates[i]] = temperatures[i]
+#
+# # Open the text file for writing.
+# with open("future_weather_data.json", "w") as f:
+#     # Write the dates and temperatures to the text file.
+#     for date, temperature in weather_data.items():
+#         f.write(f"{date}, {temperature}\n")
+#
+# # Close the text file.
+# f.close()
+#
+# # Print the dates and temperatures.
+# for date, temperature in weather_data.items():
+#     print(f"Date: {date}")
+#     print(f"Temperature: {temperature}")
+#
+# print("break")
+
 
 # Function to load or fetch data
 def load_data(data_source, tick, train_start, train_end, train_test_ratio, split_method, scale_features):
@@ -187,28 +307,30 @@ def build_deep_learning_model_with_gru(layers, layer_sizes, layer_names, input_s
     if len(layers) != len(layer_sizes) or len(layers) != len(layer_names):
         raise ValueError("The number of layers, layer_sizes, and layer_names must match.")
 
-# Create a Sequential model
+    # Create a Sequential model
     model = Sequential()
 
-# Loop through the specific layers
+    # Loop through the specific layers
     for i in range(len(layers)):
         layer_name = layer_names[i]
         layer_size = layer_sizes[i]
 
         if layers[i] == "GRU":
-# Add a GRU layer
-            print(f"Adding GRU layer with units={layer_size}, return_sequences=True, input_shape={input_shape}, name={layer_name}")
+            # Add a GRU layer
+            print(
+                f"Adding GRU layer with units={layer_size}, return_sequences=True, input_shape={input_shape}, name={layer_name}")
             model.add(GRU(units=layer_size, return_sequences=True, input_shape=input_shape, name=layer_name))
         elif layers[i] == "Dropout":
-# Add a Dropout layer
+            # Add a Dropout layer
             print(f"Adding Dropout layer with rate={layer_size}, name={layer_name}")
             model.add(Dropout(layer_size, name=layer_name))
         elif layers[i] == "Dense":
-# Add a Dense (fully connected) layer
+            # Add a Dense (fully connected) layer
             print(f"Adding Dense layer with units={layer_size}, name={layer_name}")
             model.add(Dense(units=layer_size, name=layer_name))
 
     return model
+
 
 # Function to predict stock prices using GRU model
 # def predict_stock_prices_with_gru(tick, test_start, test_end, prediction_days=1, model=None):
@@ -409,6 +531,7 @@ def build_arima_model(train_d):
     arima_result = model.fit()
     return arima_result
 
+
 def predict_arima(arima_model, test_d):
     # Make predictions using the ARIMA model
     arima_predictions = arima_model.forecast(steps=len(test_d))
@@ -417,7 +540,7 @@ def predict_arima(arima_model, test_d):
 
 # Load and preprocess the data
 train_d, test_d, _ = load_data(data_source, tick, train_start, train_end, train_test_ratio, split_method,
-                                     scale_features)
+                               scale_features)
 
 # Define the architecture LSTM model
 layers = ["LSTM", "Dropout", "LSTM", "Dropout", "LSTM", "Dropout", "Dense"]
@@ -548,7 +671,8 @@ rf_predicted_prices = rf_model.predict(x_test_2d)
 
 # Combine predictions from all models
 weight_rf = 0.2
-ensemble_predictions = (weight_lstm * lstm_predicted_prices) + (weight_arima * arima_predicted_prices) + (weight_rf * rf_predicted_prices)
+ensemble_predictions = (weight_lstm * lstm_predicted_prices) + (weight_arima * arima_predicted_prices) + (
+        weight_rf * rf_predicted_prices)
 
 # Calculate MSE and MAE for the RandomForest model
 mse_rf = mean_squared_error(test_d['Close'], rf_predicted_prices)
@@ -723,17 +847,127 @@ plot_boxplot_chart(test_d)
 # END OF BOXPLOT #
 ##################
 
+# Load the aggregated weather data
+with open("train_weather_data_aggregated.json", "r") as file:
+    weather_data = json.load(file)
 
-# Original graph, with line tick plotting:
-plt.plot(actual_prices, color="black", label=f"Actual {tick} Price")
-plt.plot(predicted_prices, color="red", label=f"Predicted {tick} Price")
-plt.title(f"{tick} Share Price")
+# Extract date and tavg values, replacing None values with 0.0
+tavg_values = [float(item["tavg"]) if item["tavg"] is not None else 0.0 for item in weather_data]
+
+# Your actual_prices and predicted_prices data here
+
+# Create a time range for the x-axis based on the length of your data
+time_range = range(len(actual_prices))
+
+# Interpolate the tavg_values to match the length of time_range
+tavg_interpolated = np.interp(time_range, np.arange(len(tavg_values)), tavg_values)
+
+# Original graph with weather data
+plt.figure(figsize=(10, 6))  # Set the figure size (width, height)
+
+# Plot the actual prices
+plt.plot(time_range, actual_prices, color="black", label=f"Actual {tick} Price")
+
+# Plot the predicted prices
+plt.plot(time_range, predicted_prices, color="red", label=f"Predicted {tick} Price")
+
+# Add weather data to the graph
+plt.plot(time_range, tavg_interpolated, color="purple", label="Average Temperature")
+
+plt.title(f"{tick} Share Price with Temperature")
 plt.xlabel("Time")
-plt.ylabel(f"{tick} Share Price")
+plt.ylabel(f"{tick} Share Price / Temperature")
 plt.legend()
-original_graph_filename = os.path.join(output_directory, f'original_graph.png')
-plt.savefig(original_graph_filename)
 plt.show()
+
+plt.figure(figsize=(12, 6))
+
+len_predicted_prices = len(predicted_prices)
+len_tavg_values = len(tavg_values)
+
+print(f"Length of predicted_prices: {len_predicted_prices}")
+print(f"Length of tavg_values: {len_tavg_values}")
+
+
+plt.subplot(1, 2, 1)
+plt.scatter(predicted_prices, tavg_values, color="green", alpha=0.6)
+plt.xlabel("Predicted Stock Price")
+plt.ylabel("Weather")
+plt.title(f"Scatter Plot {tick}")
+
+plt.subplot(1, 2, 2)
+plt.scatter(actual_prices, tavg_values, color="blue", alpha=0.6)
+plt.xlabel("Actual Price")
+plt.ylabel("Weather")
+plt.title(f"Scatter Plot {tick}")
+
+# Specify the filename for saving the plot
+plot_filename = f"scatterplot{tick}.png"
+
+# Save the scatterplot as an image
+plt.savefig(plot_filename)
+
+# Show the plot
+plt.show()
+
+print(f"Scatterplot saved as {plot_filename}")
+
+
+# Flatten the tavg_values array
+tavg_values = np.ravel(tavg_values)
+
+# Flatten the predicted_prices array
+predicted_prices = np.ravel(predicted_prices)
+
+# Create a Pandas DataFrame from the predicted prices and tavg values
+df = pd.DataFrame({
+    "predicted_prices": predicted_prices,
+    "tavg_values": tavg_values
+})
+
+# Calculate the correlation coefficient between predicted prices and tavg values
+correlation_coefficient = df["predicted_prices"].corr(df["tavg_values"])
+
+# Perform regression analysis
+regression_model = np.polyfit(df["predicted_prices"], df["tavg_values"], 1)
+
+# Calculate the predicted tavg values for the given predicted prices
+predicted_tavg_values = regression_model[0] * df["predicted_prices"] + regression_model[1]
+
+# Plot the scatterplot and the regression line
+plt.scatter(df["predicted_prices"], df["tavg_values"], color="green", alpha=0.6)
+plt.plot(df["predicted_prices"], predicted_tavg_values, color="red")
+
+# Set the title and axis labels
+plt.title(f"Scatter Plot {tick} (r = {correlation_coefficient})")
+plt.xlabel("Predicted Prices")
+plt.ylabel("Tavg Values")
+
+# Specify the filename for saving the plot
+plot_filename = f"CORRELATIONscatterplot{tick}.png"
+
+# Save the scatterplot as an image
+plt.savefig(plot_filename)
+
+# Show the plot
+plt.show()
+
+# Print the correlation coefficient and regression coefficients
+print("Correlation coefficient:", correlation_coefficient)
+print("Regression coefficients:", regression_model)
+
+# # Original graph, with line tick plotting:
+# plt.plot(actual_prices, color="black", label=f"Actual {tick} Price")
+# plt.plot(predicted_prices, color="red", label=f"Predicted {tick} Price")
+#
+# plt.title(f"{tick} Share Price")
+# plt.xlabel("Time")
+# plt.ylabel(f"{tick} Share Price")
+# plt.legend()
+# original_graph_filename = os.path.join(output_directory, f'original_graph.png')
+# plt.savefig(original_graph_filename)
+# plt.show()
+#
 
 
 # ------------------------------------------------------------------------------
@@ -840,4 +1074,3 @@ print(f"Prediction: {prediction}")
 # the stock price:
 # https://github.com/jason887/Using-Deep-Learning-Neural-Networks-and-Candlestick-Chart-Representation-to-Predict-Stock-Market
 # Can you combine these different techniques for a better prediction??
-
